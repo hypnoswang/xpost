@@ -23,8 +23,9 @@ var xpostIf = []string{
 func init() {
 	if defaltXp == nil {
 		defaltXp = &Xpost{
-			infoIntv:   0,
 			inited:     false,
+			started:    false,
+			infoIntv:   0,
 			maxProcTo:  0,
 			ex:         GetExchanger(),
 			mpoolSizes: make(map[int]int),
@@ -39,8 +40,9 @@ func GetXpost() *Xpost {
 }
 
 type Xpost struct {
-	infoIntv   time.Duration
 	inited     bool
+	started    bool
+	infoIntv   time.Duration
 	canceller  context.CancelFunc
 	maxProcTo  time.Duration
 	ex         *Exchanger
@@ -149,7 +151,7 @@ func (xp *Xpost) initMPools() bool {
 	return true
 }
 
-func (xp *Xpost) Init() bool {
+func (xp *Xpost) initXpost() bool {
 	if xp.inited {
 		return true
 	}
@@ -157,12 +159,14 @@ func (xp *Xpost) Init() bool {
 	for poolT := 0; poolT < numOfXpostIf; poolT++ {
 		max := xp.GetMsgPoolSize(poolT)
 		if max <= 0 {
-			log.Fatalf("MsgPool %s's size is not set\n", xpostIf[poolT]) // will call os.Exit(1)
+			log.Printf("MsgPool %s's size is not set\n", xpostIf[poolT])
+			return false
 		}
 	}
 
 	if !xp.initMPools() {
-		log.Fatalln("Inilialize MsgPools failed") // will call os.Exit(1)
+		log.Println("Inilialize MsgPools failed")
+		return false
 	}
 
 	xp.inited = true
@@ -170,19 +174,54 @@ func (xp *Xpost) Init() bool {
 	return true
 }
 
+func (xp *Xpost) start() bool {
+	if xp.started {
+		return true
+	}
+
+	rv := true
+
+Loop:
+	for name, couriers := range xp.Couriers {
+		log.Printf("Starting courier %s ...\n", name)
+
+		for _, courier := range couriers {
+			log.Printf("Starting %s.%d...\n", courier.GetName(), courier.GetId())
+
+			rv = rv && courier.Start()
+			if !rv {
+				log.Printf("%s.%d start failed!!\n", courier.GetName(), courier.GetId())
+				break Loop
+			}
+
+			log.Printf("%s.%d started!!\n", courier.GetName(), courier.GetId())
+		}
+
+		log.Printf("Courier %s starting finished!!\n", name)
+	}
+
+	xp.started = rv
+
+	return rv
+}
+
 func (xp *Xpost) Run() {
-	if !xp.inited {
-		log.Fatalln("The Xpost has not been initialized") // will call os.Exit(1)
+	if !xp.inited && !xp.initXpost() {
+		log.Fatalln("The Xpost Initialization failed") // will call os.Exit(1)
+	}
+
+	if !xp.started && !xp.start() {
+		log.Fatalln("The Xpost start failed") // will call os.Exit(1)
 	}
 
 	ctx, canceller := context.WithCancel(context.Background())
 	xp.canceller = canceller
 
 	for name, couriers := range xp.Couriers {
-		log.Printf("Starting courier %s ...\n", name)
+		log.Printf("Running courier %s ...\n", name)
 
 		for _, courier := range couriers {
-			log.Printf("Starting %s.%d...\n", courier.GetName(), courier.GetId())
+			log.Printf("Running %s.%d...\n", courier.GetName(), courier.GetId())
 
 			go func(courier Courier) {
 				for {
@@ -197,8 +236,6 @@ func (xp *Xpost) Run() {
 				}
 			}(courier)
 		}
-
-		log.Printf("Courier %s starting finished!!\n", name)
 	}
 
 	if xp.infoIntv > 0 {
@@ -249,6 +286,16 @@ func (xp *Xpost) Stop() {
 	// second, stop all mpools
 	for poolT := 0; poolT < numOfXpostIf; poolT++ {
 		xp.mpools[poolT].Stop()
+	}
+
+	// third, stop all courier instances
+	for name, couriers := range xp.Couriers {
+		log.Printf("Stopping courier %s ...\n", name)
+		for _, courier := range couriers {
+			log.Printf("Stopping %s.%d...\n", courier.GetName(), courier.GetId())
+			courier.Stop()
+			log.Printf("%s.%d stopped!!\n", courier.GetName(), courier.GetId())
+		}
 	}
 
 	// wait for the last dispatched event to finish

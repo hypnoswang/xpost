@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"time"
 
-	"xpost"
+	"github.com/hypnoswang/xpost"
 )
 
 type MsgGenerator struct {
@@ -121,10 +121,6 @@ func main() {
 	xpost.GetXpost().SetMsgPoolSize(xpost.ProcessT, 16)
 	xpost.GetXpost().SetMsgPoolSize(xpost.PostT, 16)
 	xpost.GetXpost().SetDumpInfoInterval(10000)
-
-	if !xpost.GetXpost().Init() {
-		log.Fatalln("Initialize xpost failed")
-	}
 
 	xpost.GetXpost().Run()
 

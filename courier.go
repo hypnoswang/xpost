@@ -35,6 +35,9 @@ type Courier interface {
 	Wait() *Message
 	Process(msg *Message) *Message
 	Post(msg *Message) *Message
+
+	Start() bool
+	Stop()
 }
 
 type CourierCreator func() Courier
@@ -112,6 +115,13 @@ func (m *Master) Post(msg *Message) *Message {
 	}
 
 	return msg
+}
+
+func (m *Master) Start() bool {
+	return true
+}
+
+func (m *Master) Stop() {
 }
 
 func run(courier Courier) {
