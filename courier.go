@@ -1,7 +1,7 @@
 package xpost
 
 import (
-	//"log"
+	"log"
 	"time"
 )
 
@@ -125,6 +125,12 @@ func (m *Master) Stop() {
 }
 
 func run(courier Courier) {
+	defer func() {
+		if e := recover(); e != nil {
+			log.Println(e)
+		}
+	}()
+
 	job1 := NewMsgJob(WaitT, courier, nil)
 	if nil == job1 {
 		return
