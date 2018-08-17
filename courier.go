@@ -40,7 +40,9 @@ type Courier interface {
 	Stop()
 }
 
-type CourierCreator func() Courier
+type CourierCreator interface {
+	Create() Courier
+}
 
 func (m Master) GetName() string {
 	return m.name

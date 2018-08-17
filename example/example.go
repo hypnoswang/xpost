@@ -14,6 +14,12 @@ type MsgGenerator struct {
 	xpost.Master
 }
 
+type MsgGeneratorCreator struct{}
+
+func (c MsgGeneratorCreator) Create() xpost.Courier {
+	return NewMsgGenerator()
+}
+
 func NewMsgGenerator() *MsgGenerator {
 	mg := &MsgGenerator{}
 
@@ -41,6 +47,12 @@ func (mg *MsgGenerator) Wait() *xpost.Message {
 
 type MsgAgency struct {
 	xpost.Master
+}
+
+type MsgAgencyCreator struct{}
+
+func (c MsgAgencyCreator) Create() xpost.Courier {
+	return NewMsgAgency()
 }
 
 func NewMsgAgency() *MsgAgency {
@@ -72,6 +84,12 @@ type MsgOuter struct {
 	xpost.Master
 }
 
+type MsgOuterCreator struct{}
+
+func (c MsgOuterCreator) Create() xpost.Courier {
+	return NewMsgOuter()
+}
+
 func NewMsgOuter() *MsgOuter {
 	mo := &MsgOuter{}
 
@@ -99,19 +117,13 @@ func main() {
 	rv := true
 
 	rv = rv && xpost.GetXpost().RegisterCourier(
-		func() xpost.Courier {
-			return NewMsgGenerator()
-		}, 2)
+		MsgGeneratorCreator{}, 2)
 
 	rv = rv && xpost.GetXpost().RegisterCourier(
-		func() xpost.Courier {
-			return NewMsgAgency()
-		}, 1)
+		MsgAgencyCreator{}, 1)
 
 	rv = rv && xpost.GetXpost().RegisterCourier(
-		func() xpost.Courier {
-			return NewMsgOuter()
-		}, 2)
+		MsgOuterCreator{}, 2)
 
 	if !rv {
 		log.Fatal("Register Courier failed")

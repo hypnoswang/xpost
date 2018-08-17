@@ -64,7 +64,7 @@ func (xp *Xpost) RegiserExchanger(e *Exchanger) bool {
 func (xp *Xpost) RegisterCourier(creator CourierCreator, concurrency int) bool {
 
 	for i := 0; i < concurrency; i++ {
-		courier := creator()
+		courier := creator.Create()
 		if courier == nil {
 			return false
 		}
