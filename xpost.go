@@ -3,6 +3,7 @@ package xpost
 import (
 	"context"
 	"log"
+	"runtime"
 	"time"
 )
 
@@ -209,6 +210,8 @@ func (xp *Xpost) Run() {
 
 	ctx, canceller := context.WithCancel(context.Background())
 	xp.canceller = canceller
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	for name, couriers := range xp.Couriers {
 		log.Printf("Running courier %s ...\n", name)
