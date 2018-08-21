@@ -45,7 +45,7 @@ type Exchanger struct {
 }
 
 func NewWire(n string, c int, rto, wto time.Duration) *Wire {
-	if c <= 0 || rto <= 0 || wto <= 0 {
+	if c < 0 || rto < 0 || wto < 0 {
 		log.Fatalf("Invalid wire attributes: name=%s, cap=%d, readTo=%d, writeTo=%d", n, c, rto, wto)
 		return nil
 	}
@@ -127,16 +127,18 @@ func (e *Exchanger) Deliver(m *Message) error {
 	for _, w := range wires {
 		go func(ch chan<- bool, w *Wire) {
 			to := w.writeTo
-			if to <= 0 {
-				to = 1000 // 1000ms
-			}
-			mytimer := time.NewTimer(to * time.Millisecond)
-			defer mytimer.Stop()
-			select {
-			case w.pipe <- m:
+			if to > 0 {
+				mytimer := time.NewTimer(to * time.Millisecond)
+				defer mytimer.Stop()
+				select {
+				case w.pipe <- m:
+					ch <- true
+				case <-mytimer.C:
+					ch <- false
+				}
+			} else {
+				w.pipe <- m
 				ch <- true
-			case <-mytimer.C:
-				ch <- false
 			}
 		}(ch, w)
 	}
@@ -159,13 +161,19 @@ func (e *Exchanger) Wait(n string) *Message {
 		return nil
 	}
 
-	mytimer := time.NewTimer(w.readTo * time.Millisecond)
-	defer mytimer.Stop()
+	if w.readTo > 0 {
+		mytimer := time.NewTimer(w.readTo * time.Millisecond)
+		defer mytimer.Stop()
 
-	select {
-	case msg := <-w.pipe:
-		return msg
-	case <-mytimer.C:
-		return nil
+		select {
+		case msg := <-w.pipe:
+			return msg
+		case <-mytimer.C:
+			return nil
+		}
 	}
+
+	msg := <-w.pipe
+
+	return msg
 }

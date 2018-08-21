@@ -84,18 +84,11 @@ func (xp *Xpost) RegisterCourier(creator CourierCreator, concurrency int) bool {
 		}
 
 		rto := courier.GetWaitTimeout()
-		if rto <= 0 {
-			rto = 1000
-		}
-
 		wto := courier.GetPostTimeout()
-		if wto <= 0 {
-			wto = 1000
-		}
 
 		if !xp.ex.WireExist(name) {
 			cap := courier.GetWireCap()
-			if cap <= 0 {
+			if cap < 0 {
 				return false
 			}
 

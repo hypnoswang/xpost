@@ -203,18 +203,31 @@ func (mp *MsgPool) increaseWorker() *MsgWorker {
 	return mw
 }
 
-func (mp *MsgPool) Dispatch(job *MsgJob) *Message {
+func (mp *MsgPool) getFreeWorker() *MsgWorker {
 	var mw *MsgWorker = nil
-	select {
-	case mw = <-mp.freelist:
-	default:
-		mw = mp.increaseWorker()
+
+	t := time.Millisecond
+	for {
+		select {
+		case mw = <-mp.freelist:
+		default:
+			mw = mp.increaseWorker()
+		}
+
+		if mw == nil {
+			log.Printf("Not enough workers for MsgPool.%d\n", mp.poolT)
+			time.Sleep(t)
+			t *= 2
+		} else {
+			break
+		}
 	}
 
-	if mw == nil {
-		log.Fatalln("Not enough workers")
-		return nil
-	}
+	return mw
+}
+
+func (mp *MsgPool) Dispatch(job *MsgJob) *Message {
+	mw := mp.getFreeWorker()
 
 	return mw.dispatch(job)
 }
