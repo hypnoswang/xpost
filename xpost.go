@@ -168,6 +168,10 @@ func (xp *Xpost) initXpost() bool {
 	return true
 }
 
+func (xp *Xpost) Deliver(msg *Message) error {
+	return xp.ex.Deliver(msg)
+}
+
 func (xp *Xpost) start() bool {
 	if xp.started {
 		return true

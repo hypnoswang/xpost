@@ -22,7 +22,7 @@ type Courier interface {
 	GetPostTimeout() time.Duration
 	GetProcessTimeout() time.Duration
 	GetId() int
-	getXpost() *Xpost
+	GetXpost() *Xpost
 
 	SetName(n string)
 	SetWireCap(n int)
@@ -68,7 +68,7 @@ func (m Master) GetId() int {
 	return m.id
 }
 
-func (m Master) getXpost() *Xpost {
+func (m Master) GetXpost() *Xpost {
 	return m.xp
 }
 
@@ -138,7 +138,7 @@ func run(courier Courier) {
 		return
 	}
 
-	msg1 := courier.getXpost().mpools[WaitT].Dispatch(job1)
+	msg1 := courier.GetXpost().mpools[WaitT].Dispatch(job1)
 	if nil == msg1 {
 		return
 	}
@@ -147,7 +147,7 @@ func run(courier Courier) {
 	if nil == job2 {
 		return
 	}
-	msg2 := courier.getXpost().mpools[ProcessT].Dispatch(job2)
+	msg2 := courier.GetXpost().mpools[ProcessT].Dispatch(job2)
 	if nil == msg2 {
 		return
 	}
@@ -156,7 +156,7 @@ func run(courier Courier) {
 	if nil == job3 {
 		return
 	}
-	msg3 := courier.getXpost().mpools[PostT].Dispatch(job3)
+	msg3 := courier.GetXpost().mpools[PostT].Dispatch(job3)
 	if nil == msg3 {
 		return
 	}
