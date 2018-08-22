@@ -8,6 +8,7 @@ import (
 type Master struct {
 	id      int
 	wirecap int
+	sender  bool
 	waitto  time.Duration
 	postto  time.Duration
 	procto  time.Duration
@@ -21,6 +22,7 @@ type Courier interface {
 	GetWaitTimeout() time.Duration
 	GetPostTimeout() time.Duration
 	GetProcessTimeout() time.Duration
+	IsSender() bool
 	GetId() int
 	GetXpost() *Xpost
 
@@ -29,6 +31,7 @@ type Courier interface {
 	SetPostTimeout(to time.Duration)
 	SetWaitTimeout(to time.Duration)
 	SetProcessTimeout(to time.Duration)
+	SetSender(b bool)
 	setId(n int)
 	setXpost(xp *Xpost)
 
@@ -68,6 +71,10 @@ func (m Master) GetId() int {
 	return m.id
 }
 
+func (m Master) IsSender() bool {
+	return m.sender
+}
+
 func (m Master) GetXpost() *Xpost {
 	return m.xp
 }
@@ -90,6 +97,10 @@ func (m *Master) SetPostTimeout(to time.Duration) {
 
 func (m *Master) SetProcessTimeout(to time.Duration) {
 	m.procto = to
+}
+
+func (m *Master) SetSender(b bool) {
+	m.sender = b
 }
 
 func (m *Master) setId(n int) {

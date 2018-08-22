@@ -177,3 +177,14 @@ func (e *Exchanger) Wait(n string) *Message {
 
 	return msg
 }
+
+func (e *Exchanger) isClean() bool {
+	for _, w := range e.wires {
+		if l := len(w.pipe); l > 0 {
+			log.Printf("Wire %s is not clean: %d", w.name, l)
+			return false
+		}
+	}
+
+	return true
+}

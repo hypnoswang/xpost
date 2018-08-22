@@ -25,12 +25,13 @@ func NewMsgGenerator() *MsgGenerator {
 
 	mg.SetName("MsgGen")
 	mg.SetWireCap(100)
+	mg.SetSender(true)
 
 	return mg
 }
 
 func (mg *MsgGenerator) Wait() *xpost.Message {
-	time.Sleep(800 * time.Millisecond)
+	time.Sleep(1 * time.Millisecond)
 	//	log.Printf("In MsgGenerator.Wait\n")
 	msg := xpost.GetMessage()
 	if nil == msg {
@@ -132,7 +133,7 @@ func main() {
 	xpost.GetXpost().SetMsgPoolSize(xpost.WaitT, 16)
 	xpost.GetXpost().SetMsgPoolSize(xpost.ProcessT, 16)
 	xpost.GetXpost().SetMsgPoolSize(xpost.PostT, 16)
-	xpost.GetXpost().SetDumpInfoInterval(10000)
+	//	xpost.GetXpost().SetDumpInfoInterval(10000)
 
 	xpost.GetXpost().Run()
 

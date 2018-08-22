@@ -1,7 +1,6 @@
 package xpost
 
 import (
-	"context"
 	"log"
 	"runtime"
 	"time"
@@ -26,12 +25,15 @@ func init() {
 		defaltXp = &Xpost{
 			inited:     false,
 			started:    false,
+			hasSender:  false,
 			infoIntv:   0,
 			maxProcTo:  0,
 			ex:         GetExchanger(),
 			mpoolSizes: make(map[int]int),
 			mpools:     make(map[int]*MsgPool),
-			Couriers:   make(map[string][]Courier)}
+			Couriers:   make(map[string][]Courier),
+			stopch:     make(chan struct{}),
+			quitch:     make(chan struct{})}
 	}
 
 }
@@ -43,13 +45,16 @@ func GetXpost() *Xpost {
 type Xpost struct {
 	inited     bool
 	started    bool
+	hasSender  bool
 	infoIntv   time.Duration
-	canceller  context.CancelFunc
 	maxProcTo  time.Duration
 	ex         *Exchanger
 	mpoolSizes map[int]int
 	mpools     map[int]*MsgPool
 	Couriers   map[string][]Courier
+
+	stopch chan struct{}
+	quitch chan struct{}
 }
 
 func (xp *Xpost) RegiserExchanger(e *Exchanger) bool {
@@ -78,6 +83,7 @@ func (xp *Xpost) RegisterCourier(creator CourierCreator, concurrency int) bool {
 		courier.setXpost(xp)
 		courier.setId(i)
 		xp.Couriers[name] = append(xp.Couriers[name], courier)
+		xp.hasSender = xp.hasSender || courier.IsSender()
 
 		procto := courier.GetProcessTimeout()
 		if procto > xp.maxProcTo {
@@ -146,6 +152,11 @@ func (xp *Xpost) initMPools() bool {
 }
 
 func (xp *Xpost) initXpost() bool {
+	if !xp.hasSender {
+		log.Printf("The xpost must have at least one sender")
+		return false
+	}
+
 	if xp.inited {
 		return true
 	}
@@ -212,9 +223,6 @@ func (xp *Xpost) Run() {
 		log.Fatalln("The Xpost start failed") // will call os.Exit(1)
 	}
 
-	ctx, canceller := context.WithCancel(context.Background())
-	xp.canceller = canceller
-
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	for name, couriers := range xp.Couriers {
@@ -225,12 +233,25 @@ func (xp *Xpost) Run() {
 
 			go func(courier Courier) {
 				for {
-					select {
-					case <-ctx.Done():
-						log.Printf("Courier %s.%d exit...", courier.GetName(), courier.GetId())
-						return
-					default:
-						run(courier)
+					if courier.IsSender() {
+						select {
+						case <-xp.stopch:
+							log.Printf("Sender Courier %s.%d exit...", courier.GetName(), courier.GetId())
+							return
+						case <-xp.quitch:
+							log.Printf("Courier %s.%d exit...", courier.GetName(), courier.GetId())
+							return
+						default:
+							run(courier)
+						}
+					} else {
+						select {
+						case <-xp.quitch:
+							log.Printf("Courier %s.%d exit...", courier.GetName(), courier.GetId())
+							return
+						default:
+							run(courier)
+						}
 					}
 
 				}
@@ -243,7 +264,7 @@ func (xp *Xpost) Run() {
 			ticker := time.Tick(xp.infoIntv * time.Millisecond)
 			for {
 				select {
-				case <-ctx.Done():
+				case <-xp.quitch:
 					return
 				case <-ticker:
 					xp.Info()
@@ -279,32 +300,50 @@ func (xp *Xpost) Info() {
 	}
 }
 
-func (xp *Xpost) Stop() {
-	// first, stop new event generation
-	xp.canceller()
+func (xp *Xpost) stopSendersAndWait(t time.Duration) {
+	close(xp.stopch)
 
-	// second, stop all mpools
+	// wait for the goroutines handle the signal
+	time.Sleep(t * time.Millisecond)
+
+	for !xp.ex.isClean() {
+		time.Sleep(100 * time.Millisecond)
+		log.Println("Waiting for all the wires to be clean...")
+	}
+}
+
+func (xp *Xpost) Stop() {
+	t1, t2 := xp.ex.GetMaxTimeout()
+	t3 := xp.GetMaxProcessTimeout()
+	t := t1 + t2 + t3
+	if t < 1000 {
+		t = 1000
+	}
+
+	// first, stop all the sender couriers and wait ntil all the wires are empty
+	xp.stopSendersAndWait(t)
+
+	// second, stop new event generation
+	close(xp.quitch)
+	// wait for the goroutines handle the signal
+	time.Sleep(t * time.Millisecond)
+
+	// third, stop all mpools
 	for poolT := 0; poolT < numOfXpostIf; poolT++ {
 		xp.mpools[poolT].Stop()
 	}
 
-	// third, stop all courier instances
+	// forth, stop all courier instances
 	for name, couriers := range xp.Couriers {
 		log.Printf("Stopping courier %s ...\n", name)
 		for _, courier := range couriers {
+			if courier.IsSender() {
+				continue
+			}
+
 			log.Printf("Stopping %s.%d...\n", courier.GetName(), courier.GetId())
 			courier.Stop()
 			log.Printf("%s.%d stopped!!\n", courier.GetName(), courier.GetId())
 		}
 	}
-
-	// wait for the last dispatched event to finish
-	t1, t2 := xp.ex.GetMaxTimeout()
-	t3 := xp.GetMaxProcessTimeout()
-	t := t1 + t2 + t3
-	if t < 3000 {
-		t = 3000
-	}
-
-	time.Sleep(t * time.Millisecond)
 }
