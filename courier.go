@@ -2,16 +2,12 @@ package xpost
 
 import (
 	"log"
-	"time"
 )
 
 type Master struct {
 	id      int
 	wirecap int
 	sender  bool
-	waitto  time.Duration
-	postto  time.Duration
-	procto  time.Duration
 	name    string
 	xp      *Xpost
 }
@@ -19,18 +15,12 @@ type Master struct {
 type Courier interface {
 	GetName() string
 	GetWireCap() int
-	GetWaitTimeout() time.Duration
-	GetPostTimeout() time.Duration
-	GetProcessTimeout() time.Duration
 	IsSender() bool
 	GetId() int
 	GetXpost() *Xpost
 
 	SetName(n string)
 	SetWireCap(n int)
-	SetPostTimeout(to time.Duration)
-	SetWaitTimeout(to time.Duration)
-	SetProcessTimeout(to time.Duration)
 	SetSender(b bool)
 	setId(n int)
 	setXpost(xp *Xpost)
@@ -47,24 +37,20 @@ type CourierCreator interface {
 	Create() Courier
 }
 
+type CourierJob struct {
+	courier Courier
+}
+
+func (c *CourierJob) Run() {
+	run(c.courier)
+}
+
 func (m Master) GetName() string {
 	return m.name
 }
 
 func (m Master) GetWireCap() int {
 	return m.wirecap
-}
-
-func (m Master) GetWaitTimeout() time.Duration {
-	return m.waitto
-}
-
-func (m Master) GetPostTimeout() time.Duration {
-	return m.postto
-}
-
-func (m Master) GetProcessTimeout() time.Duration {
-	return m.procto
 }
 
 func (m Master) GetId() int {
@@ -85,18 +71,6 @@ func (m *Master) SetName(n string) {
 
 func (m *Master) SetWireCap(n int) {
 	m.wirecap = n
-}
-
-func (m *Master) SetWaitTimeout(to time.Duration) {
-	m.waitto = to
-}
-
-func (m *Master) SetPostTimeout(to time.Duration) {
-	m.postto = to
-}
-
-func (m *Master) SetProcessTimeout(to time.Duration) {
-	m.procto = to
 }
 
 func (m *Master) SetSender(b bool) {
@@ -144,31 +118,19 @@ func run(courier Courier) {
 		}
 	}()
 
-	job1 := NewMsgJob(WaitT, courier, nil)
-	if nil == job1 {
-		return
-	}
-
-	msg1 := courier.GetXpost().mpools[WaitT].Dispatch(job1)
+	msg1 := courier.Wait()
 	if nil == msg1 {
 		return
 	}
 
-	job2 := NewMsgJob(ProcessT, courier, msg1)
-	if nil == job2 {
-		return
-	}
-	msg2 := courier.GetXpost().mpools[ProcessT].Dispatch(job2)
+	msg2 := courier.Process(msg1)
 	if nil == msg2 {
 		return
 	}
 
-	job3 := NewMsgJob(PostT, courier, msg2)
-	if nil == job3 {
-		return
-	}
-	msg3 := courier.GetXpost().mpools[PostT].Dispatch(job3)
+	msg3 := courier.Post(msg2)
 	if nil == msg3 {
 		return
 	}
+
 }

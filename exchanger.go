@@ -1,11 +1,8 @@
 package xpost
 
 import (
-	//"fmt"
-	//"context"
 	"errors"
 	"log"
-	"time"
 )
 
 var g_exchanger *Exchanger
@@ -13,58 +10,43 @@ var g_exchanger *Exchanger
 func init() {
 	if g_exchanger == nil {
 		g_exchanger = &Exchanger{
-			maxRdTo: 0,
-			maxWrTo: 0,
-			wires:   make(map[string]*Wire)}
+			xp:    nil,
+			wires: make(map[string]*Wire)}
 	}
 }
 
 func GetExchanger() *Exchanger {
 	if g_exchanger == nil {
 		g_exchanger = &Exchanger{
-			maxRdTo: 0,
-			maxWrTo: 0,
-			wires:   make(map[string]*Wire)}
+			xp:    nil,
+			wires: make(map[string]*Wire)}
 	}
 
 	return g_exchanger
 }
 
 type Wire struct {
-	name    string
-	cap     int
-	readTo  time.Duration
-	writeTo time.Duration
-	pipe    chan *Message
+	name string
+	cap  int
+	pipe chan *Message
 }
 
 type Exchanger struct {
-	maxRdTo time.Duration
-	maxWrTo time.Duration
-	wires   map[string]*Wire
+	xp    *Xpost
+	wires map[string]*Wire
 }
 
-func NewWire(n string, c int, rto, wto time.Duration) *Wire {
-	if c < 0 || rto < 0 || wto < 0 {
-		log.Fatalf("Invalid wire attributes: name=%s, cap=%d, readTo=%d, writeTo=%d", n, c, rto, wto)
+func NewWire(n string, c int) *Wire {
+	if c < 0 || len(n) <= 0 {
+		log.Fatalf("Invalid wire attributes: name=%s, cap=%d", n, c)
 		return nil
 	}
 
 	return &Wire{
-		name:    n,
-		cap:     c,
-		readTo:  rto,
-		writeTo: wto,
-		pipe:    make(chan *Message, c),
+		name: n,
+		cap:  c,
+		pipe: make(chan *Message, c),
 	}
-}
-
-func (w *Wire) SetReadTimeout(to time.Duration) {
-	w.readTo = to
-}
-
-func (w *Wire) SetWriteTimeout(to time.Duration) {
-	w.writeTo = to
 }
 
 func (e Exchanger) WireExist(n string) bool {
@@ -73,19 +55,15 @@ func (e Exchanger) WireExist(n string) bool {
 	return ok
 }
 
-func (e *Exchanger) RegisterWire(n string, c int, rto, wto time.Duration) bool {
-	w := NewWire(n, c, rto, wto)
+func (e *Exchanger) SetXpost(xp *Xpost) {
+	e.xp = xp
+}
+
+func (e *Exchanger) RegisterWire(n string, c int) bool {
+	w := NewWire(n, c)
 	if w == nil {
 		log.Fatal("Could not create new Wire") // will call os.Exit(1)
 		return false
-	}
-
-	if rto > e.maxRdTo {
-		e.maxRdTo = rto
-	}
-
-	if wto > e.maxWrTo {
-		e.maxWrTo = wto
 	}
 
 	e.wires[n] = w
@@ -98,15 +76,18 @@ func (e Exchanger) Info() {
 	for _, wire := range e.wires {
 		log.Printf(">>>>>> name: %s\n", wire.name)
 		log.Printf(">>>>>> capacity: %d\n", wire.cap)
-		log.Printf(">>>>>> readtimeout: %d\n", wire.readTo)
-		log.Printf(">>>>>> writetimeout: %d\n", wire.writeTo)
 		log.Printf(">>>>>> msg-queued: %d\n", len(wire.pipe))
 		log.Println()
 	}
 }
 
-func (e Exchanger) GetMaxTimeout() (rto, wto time.Duration) {
-	return e.maxRdTo, e.maxWrTo
+type wireDeliverJob struct {
+	msg  *Message
+	wire *Wire
+}
+
+func (wdj *wireDeliverJob) Run() {
+	wdj.wire.pipe <- wdj.msg
 }
 
 func (e *Exchanger) Deliver(m *Message) error {
@@ -115,62 +96,34 @@ func (e *Exchanger) Deliver(m *Message) error {
 	}
 
 	wires := make([]*Wire, 0)
-	for _, to := range m.to {
-		if w, ok := e.wires[to]; !ok {
+	for _, dest := range m.dest {
+		if w, ok := e.wires[dest]; !ok {
+			log.Printf("Deliver to not exist wire: %s", dest)
 			return errors.New("Wire not found")
 		} else {
 			wires = append(wires, w)
 		}
 	}
 
-	ch := make(chan bool, len(wires))
+	donechs := make([]<-chan struct{}, 0)
 	for _, w := range wires {
-		go func(ch chan<- bool, w *Wire) {
-			to := w.writeTo
-			if to > 0 {
-				mytimer := time.NewTimer(to * time.Millisecond)
-				defer mytimer.Stop()
-				select {
-				case w.pipe <- m:
-					ch <- true
-				case <-mytimer.C:
-					ch <- false
-				}
-			} else {
-				w.pipe <- m
-				ch <- true
-			}
-		}(ch, w)
+		wdj := &wireDeliverJob{msg: m, wire: w}
+		donech := e.xp.pool.Dispatch(wdj)
+		donechs = append(donechs, donech)
 	}
 
-	rv := true
-	for i := 0; i < len(wires); i++ {
-		rv = rv && <-ch
-	}
-
-	if !rv {
-		return errors.New("Deliver msg to some wire timed out")
+	for _, donech := range donechs {
+		<-donech
 	}
 
 	return nil
+
 }
 
 func (e *Exchanger) Wait(n string) *Message {
 	w, ok := e.wires[n]
 	if !ok {
 		return nil
-	}
-
-	if w.readTo > 0 {
-		mytimer := time.NewTimer(w.readTo * time.Millisecond)
-		defer mytimer.Stop()
-
-		select {
-		case msg := <-w.pipe:
-			return msg
-		case <-mytimer.C:
-			return nil
-		}
 	}
 
 	msg := <-w.pipe

@@ -1,7 +1,6 @@
 package xpost
 
 import (
-	"context"
 	"log"
 	"sync"
 	"time"
@@ -12,210 +11,135 @@ const (
 	sigDone
 )
 
-type MsgJob struct {
-	jobT    int
-	courier Courier
-	msg     *Message
+type Job interface {
+	Run()
 }
 
-type MsgWorker struct {
-	ch     chan *MsgJob
-	notify chan int
-	done   chan *Message
-	pool   *MsgPool
+type Worker struct {
+	jobch chan Job
+	done  chan struct{}
+	pool  *Pool
 }
 
-type MsgPool struct {
-	max      int
-	poolT    int
-	xp       *Xpost
-	lock     *sync.Mutex
-	workers  []*MsgWorker
-	freelist chan *MsgWorker
+type Pool struct {
+	name string
+	max  int
+
+	xp      *Xpost
+	lock    *sync.Mutex
+	workers []*Worker
+
+	freelist chan *Worker
 	quit     chan struct{}
 }
 
-func NewMsgJob(t int, c Courier, m *Message) *MsgJob {
-	job := &MsgJob{
-		jobT:    t,
-		courier: c,
-		msg:     m}
-
-	if !job.Validate() {
-		return nil
-	}
-
-	return job
+func (w *Worker) free() {
+	w.pool.freelist <- w
 }
 
-func (mj *MsgJob) Validate() bool {
-	if mj.courier == nil ||
-		(mj.jobT != WaitT && mj.msg == nil) {
-		return false
-	}
-
-	if mj.jobT < 0 || mj.jobT >= numOfXpostIf {
-		return false
-	}
-
-	return true
-}
-
-func (mw *MsgWorker) free() {
-	mw.pool.freelist <- mw
-}
-
-func (mw *MsgWorker) start() {
-	log.Printf("Start MsgWorker of MsgPool.%d...", mw.pool.poolT)
+func (w *Worker) start() {
+	log.Printf("Start Worker of Pool %s...", w.pool.name)
 	go func() {
 		for {
 			select {
-			case job := <-mw.ch:
-				mw.exec(job)
-			case <-mw.pool.quit:
-				log.Printf("Stop MsgWorker of MsgPool.%d...\n", mw.pool.poolT)
+			case job := <-w.jobch:
+				w.exec(job)
+				w.free()
+			case <-w.pool.quit:
+				log.Printf("Stop Worker of Pool %s...\n", w.pool.name)
 				return
-			case sig := <-mw.notify:
-				switch sig {
-				case sigTimeout:
-					mw.done = make(chan *Message, 1)
-					fallthrough
-				case sigDone:
-					mw.free()
-				default:
-					//do nothing
-				}
 			}
 		}
 	}()
 }
 
-func (mw *MsgWorker) exec(job *MsgJob) {
-	courier := job.courier
-	msg := job.msg
-
-	var rmsg *Message = nil
-	switch job.jobT {
-	case WaitT:
-		rmsg = courier.Wait()
-	case ProcessT:
-		rmsg = courier.Process(msg)
-	case PostT:
-		rmsg = courier.Post(msg)
-	}
-
-	mw.done <- rmsg
-}
-
-func (mw *MsgWorker) dispatch(job *MsgJob) *Message {
-	if job == nil || job.jobT != mw.pool.poolT {
-		mw.free()
-		return nil
-	}
-
-	mw.ch <- job
-
-	var to time.Duration = 0 //default value
-	switch job.jobT {
-	case WaitT:
-		to = job.courier.GetWaitTimeout()
-	case ProcessT:
-		to = job.courier.GetProcessTimeout()
-	case PostT:
-		to = job.courier.GetPostTimeout()
-	}
-
-	if to > 0 {
-		ctx, canceller := context.WithTimeout(context.Background(), to*time.Millisecond)
-		defer canceller()
-
-		select {
-		case <-ctx.Done():
-			//notify the worker the timeout event
-			mw.notify <- sigTimeout
-			return nil
-		case msg := <-mw.done:
-			mw.notify <- sigDone
-			return msg
+func (w *Worker) exec(job Job) {
+	defer func() {
+		w.done <- struct{}{}
+		if e := recover(); e != nil {
+			log.Println(e)
 		}
-	} else {
-		msg := <-mw.done
-		mw.notify <- sigDone
-		return msg
-	}
+	}()
+
+	job.Run()
+
 }
 
-func NewMsgPool(poolT int, max int, xp *Xpost) *MsgPool {
-	if poolT < 0 || poolT >= numOfXpostIf {
+func (w *Worker) dispatch(job Job) {
+	if job == nil {
+		w.done <- struct{}{}
+		return
+	}
+
+	w.jobch <- job
+}
+
+func NewPool(name string, max int, xp *Xpost) *Pool {
+	if len(name) <= 0 || max <= 0 || xp == nil {
 		return nil
 	}
 
-	if max <= 0 || xp == nil {
-		return nil
-	}
-
-	return &MsgPool{
-		freelist: make(chan *MsgWorker, max),
+	return &Pool{
 		max:      max,
-		poolT:    poolT,
-		workers:  make([]*MsgWorker, 0),
+		name:     name,
 		xp:       xp,
 		lock:     &sync.Mutex{},
+		workers:  make([]*Worker, 0),
 		quit:     make(chan struct{}),
+		freelist: make(chan *Worker, max),
 	}
 }
 
-func (mp *MsgPool) SetMaxWorker(n int) {
-	mp.max = n
+func (p *Pool) SetMaxWorker(n int) {
+	p.max = n
 }
 
-func (mp *MsgPool) GetMaxWorker() int {
-	return mp.max
+func (p *Pool) GetMaxWorker() int {
+	return p.max
 }
 
-func (mp *MsgPool) newMsgWorker() *MsgWorker {
-	mw := &MsgWorker{
-		ch:     make(chan *MsgJob, 1),
-		done:   make(chan *Message, 1),
-		notify: make(chan int, 1),
-		pool:   mp}
+func (p *Pool) newWorker() *Worker {
+	w := &Worker{
+		jobch: make(chan Job),
+		done:  make(chan struct{}),
+		pool:  p}
 
-	mw.start()
+	w.start()
 
-	return mw
+	return w
 }
 
-func (mp *MsgPool) increaseWorker() *MsgWorker {
-	mp.lock.Lock()
-	defer mp.lock.Unlock()
+func (p *Pool) increaseWorker() *Worker {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 
-	if len(mp.workers) >= mp.max {
+	if len(p.workers) >= p.max {
 		return nil
 	}
 
-	mw := mp.newMsgWorker()
-	if nil == mw {
+	w := p.newWorker()
+	if nil == w {
 		return nil
 	}
 
-	mp.workers = append(mp.workers, mw)
+	p.workers = append(p.workers, w)
 
-	return mw
+	return w
 }
 
-func (mp *MsgPool) getFreeWorker() *MsgWorker {
-	var mw *MsgWorker = nil
+func (p *Pool) getFreeWorker() *Worker {
+	var w *Worker = nil
 
 	t := time.Millisecond
 	for {
 		select {
-		case mw = <-mp.freelist:
+		case w = <-p.freelist:
 		default:
-			mw = mp.increaseWorker()
+			w = p.increaseWorker()
 		}
 
-		if mw == nil {
-			log.Printf("Not enough workers for MsgPool.%d\n", mp.poolT)
+		if w == nil {
+			log.Printf("Not enough workers for Pool %s\n", p.name)
 			time.Sleep(t)
 			t *= 2
 		} else {
@@ -223,29 +147,33 @@ func (mp *MsgPool) getFreeWorker() *MsgWorker {
 		}
 	}
 
-	return mw
+	return w
 }
 
-func (mp *MsgPool) Dispatch(job *MsgJob) *Message {
-	mw := mp.getFreeWorker()
+func (p *Pool) Dispatch(job Job) <-chan struct{} {
+	w := p.getFreeWorker()
 
-	return mw.dispatch(job)
+	w.dispatch(job)
+
+	return w.done
 }
 
-func (mp *MsgPool) Info() {
-	log.Printf(">>>>>> Type\t\tMax\t\tCreated\t\tFree\n")
-	log.Printf(">>>>>> __________________________________________________________\n")
+func (p *Pool) Info() {
+	log.Printf(">>>>>> Pool %s info: \n", p.name)
 
-	mp.lock.Lock()
-	created := len(mp.workers)
-	free := len(mp.freelist)
-	mp.lock.Unlock()
+	p.lock.Lock()
+	created := len(p.workers)
+	free := len(p.freelist)
+	p.lock.Unlock()
 
-	log.Printf(">>>>>> %s\t\t%d\t\t%d\t\t%d\n\n", xpostIf[mp.poolT], mp.max, created, free)
+	log.Printf(">>>>>> \tname: %s\n", p.name)
+	log.Printf(">>>>>> \tmax: %d\n", p.max)
+	log.Printf(">>>>>> \tcreated: %d\n", created)
+	log.Printf(">>>>>> \tfree: %d\n", free)
 }
 
-func (mp *MsgPool) Stop() {
-	log.Printf("Stop MsgPool %d...\n", mp.poolT)
+func (p *Pool) Stop() {
+	log.Printf("Stop Pool %s...\n", p.name)
 
-	close(mp.quit)
+	close(p.quit)
 }

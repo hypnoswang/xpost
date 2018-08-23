@@ -23,17 +23,15 @@ var xpostIf = []string{
 func init() {
 	if defaltXp == nil {
 		defaltXp = &Xpost{
-			inited:     false,
-			started:    false,
-			hasSender:  false,
-			infoIntv:   0,
-			maxProcTo:  0,
-			ex:         GetExchanger(),
-			mpoolSizes: make(map[int]int),
-			mpools:     make(map[int]*MsgPool),
-			Couriers:   make(map[string][]Courier),
-			stopch:     make(chan struct{}),
-			quitch:     make(chan struct{})}
+			inited:    false,
+			started:   false,
+			hasSender: false,
+			infoIntv:  0,
+			ex:        GetExchanger(),
+			pool:      nil,
+			couriers:  make(map[string][]Courier),
+			senderch:  make(chan struct{}),
+			quitch:    make(chan struct{})}
 	}
 
 }
@@ -43,18 +41,21 @@ func GetXpost() *Xpost {
 }
 
 type Xpost struct {
-	inited     bool
-	started    bool
-	hasSender  bool
-	infoIntv   time.Duration
-	maxProcTo  time.Duration
-	ex         *Exchanger
-	mpoolSizes map[int]int
-	mpools     map[int]*MsgPool
-	Couriers   map[string][]Courier
+	inited    bool
+	started   bool
+	hasSender bool
 
-	stopch chan struct{}
-	quitch chan struct{}
+	infoIntv time.Duration
+
+	poolSize int
+	poolName string
+	pool     *Pool
+
+	ex       *Exchanger
+	couriers map[string][]Courier
+
+	senderch chan struct{}
+	quitch   chan struct{}
 }
 
 func (xp *Xpost) RegiserExchanger(e *Exchanger) bool {
@@ -63,6 +64,7 @@ func (xp *Xpost) RegiserExchanger(e *Exchanger) bool {
 	}
 
 	xp.ex = e
+	e.xp = xp
 
 	return true
 }
@@ -82,16 +84,8 @@ func (xp *Xpost) RegisterCourier(creator CourierCreator, concurrency int) bool {
 
 		courier.setXpost(xp)
 		courier.setId(i)
-		xp.Couriers[name] = append(xp.Couriers[name], courier)
+		xp.couriers[name] = append(xp.couriers[name], courier)
 		xp.hasSender = xp.hasSender || courier.IsSender()
-
-		procto := courier.GetProcessTimeout()
-		if procto > xp.maxProcTo {
-			xp.maxProcTo = procto
-		}
-
-		rto := courier.GetWaitTimeout()
-		wto := courier.GetPostTimeout()
 
 		if !xp.ex.WireExist(name) {
 			cap := courier.GetWireCap()
@@ -99,17 +93,13 @@ func (xp *Xpost) RegisterCourier(creator CourierCreator, concurrency int) bool {
 				return false
 			}
 
-			if !xp.ex.RegisterWire(name, cap, rto, wto) {
+			if !xp.ex.RegisterWire(name, cap) {
 				return false
 			}
 		}
 	}
 
 	return true
-}
-
-func (xp *Xpost) GetMaxProcessTimeout() time.Duration {
-	return xp.maxProcTo
 }
 
 func (xp *Xpost) GetDumpInfoInterval() time.Duration {
@@ -120,59 +110,55 @@ func (xp *Xpost) SetDumpInfoInterval(n time.Duration) {
 	xp.infoIntv = n
 }
 
-func (xp *Xpost) GetMsgPoolSize(poolT int) int {
-	if n, ok := xp.mpoolSizes[poolT]; ok {
-		return n
-	}
-
-	return 0
+func (xp *Xpost) SetPoolSize(n int) {
+	xp.poolSize = n
 }
 
-func (xp *Xpost) SetMsgPoolSize(poolT int, n int) {
-	if poolT < 0 || poolT >= numOfXpostIf {
-		log.Fatalf("Unsupported poolT: %d\n", poolT)
-	}
-
-	xp.mpoolSizes[poolT] = n
+func (xp *Xpost) GetPoolSize() int {
+	return xp.poolSize
 }
 
-func (xp *Xpost) initMPools() bool {
-	for poolT := 0; poolT < numOfXpostIf; poolT++ {
-		max := xp.GetMsgPoolSize(poolT)
-		mp := NewMsgPool(poolT, max, xp)
-		if mp == nil {
-			return false
-		}
-
-		mp.SetMaxWorker(max)
-		xp.mpools[poolT] = mp
-	}
-
-	return true
+func (xp *Xpost) SetPoolName(s string) {
+	xp.poolName = s
 }
 
-func (xp *Xpost) initXpost() bool {
+func (xp *Xpost) GetPoolName() string {
+	return xp.poolName
+}
+
+func (xp *Xpost) init() bool {
+	if xp.inited {
+		return true
+	}
+
 	if !xp.hasSender {
 		log.Printf("The xpost must have at least one sender")
 		return false
 	}
 
-	if xp.inited {
-		return true
+	if len(xp.poolName) <= 0 {
+		xp.poolName = "DefaultPool"
 	}
 
-	for poolT := 0; poolT < numOfXpostIf; poolT++ {
-		max := xp.GetMsgPoolSize(poolT)
-		if max <= 0 {
-			log.Printf("MsgPool %s's size is not set\n", xpostIf[poolT])
-			return false
+	if xp.poolSize <= 0 {
+		wireCnt := len(xp.ex.wires)
+
+		courierCnt := 0
+		for _, couries := range xp.couriers {
+			courierCnt += len(couries)
 		}
+
+		xp.poolSize = 2 * (wireCnt + courierCnt)
 	}
 
-	if !xp.initMPools() {
-		log.Println("Inilialize MsgPools failed")
+	pool := NewPool(xp.poolName, xp.poolSize, xp)
+	if pool == nil {
+		log.Printf("Create pool failed")
 		return false
 	}
+
+	xp.ex.SetXpost(xp)
+	xp.pool = pool
 
 	xp.inited = true
 
@@ -191,7 +177,7 @@ func (xp *Xpost) start() bool {
 	rv := true
 
 Loop:
-	for name, couriers := range xp.Couriers {
+	for name, couriers := range xp.couriers {
 		log.Printf("Starting courier %s ...\n", name)
 
 		for _, courier := range couriers {
@@ -215,7 +201,7 @@ Loop:
 }
 
 func (xp *Xpost) Run() {
-	if !xp.inited && !xp.initXpost() {
+	if !xp.inited && !xp.init() {
 		log.Fatalln("The Xpost Initialization failed") // will call os.Exit(1)
 	}
 
@@ -225,32 +211,39 @@ func (xp *Xpost) Run() {
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	for name, couriers := range xp.Couriers {
+	for name, couriers := range xp.couriers {
 		log.Printf("Running courier %s ...\n", name)
 
 		for _, courier := range couriers {
 			log.Printf("Running %s.%d...\n", courier.GetName(), courier.GetId())
 
 			go func(courier Courier) {
+				job := &CourierJob{courier: courier}
+				quit := false
 				for {
+					if quit {
+						return
+					}
+
+					jobdone := xp.pool.Dispatch(job)
 					if courier.IsSender() {
 						select {
-						case <-xp.stopch:
+						case <-xp.senderch:
+							quit = true
 							log.Printf("Sender Courier %s.%d exit...", courier.GetName(), courier.GetId())
-							return
 						case <-xp.quitch:
-							log.Printf("Courier %s.%d exit...", courier.GetName(), courier.GetId())
-							return
-						default:
-							run(courier)
+							log.Printf("Sender Courier %s.%d exit...", courier.GetName(), courier.GetId())
+							quit = true
+						case <-jobdone:
+							continue
 						}
 					} else {
 						select {
 						case <-xp.quitch:
 							log.Printf("Courier %s.%d exit...", courier.GetName(), courier.GetId())
-							return
-						default:
-							run(courier)
+							quit = true
+						case <-jobdone:
+							continue
 						}
 					}
 
@@ -275,15 +268,12 @@ func (xp *Xpost) Run() {
 }
 
 func (xp *Xpost) Info() {
-	log.Printf(">>>>>> Couriers info:\n")
-	for _, couriers := range xp.Couriers {
+	log.Printf(">>>>>> couriers info:\n")
+	for _, couriers := range xp.couriers {
 		for _, courier := range couriers {
 			log.Printf(">>>>>> id: %d\n", courier.GetId())
 			log.Printf(">>>>>> name: %s\n", courier.GetName())
 			log.Printf(">>>>>> wirecap: %d\n", courier.GetWireCap())
-			log.Printf(">>>>>> WaitTimeout: %d\n", courier.GetWaitTimeout())
-			log.Printf(">>>>>> ProcTimeout: %d\n", courier.GetProcessTimeout())
-			log.Printf(">>>>>> PostTimeout: %d\n", courier.GetPostTimeout())
 			log.Println()
 		}
 	}
@@ -294,14 +284,11 @@ func (xp *Xpost) Info() {
 
 	log.Printf("\n\n")
 
-	log.Printf(">>>>>> MsgPools info:\n")
-	for _, mpool := range xp.mpools {
-		mpool.Info()
-	}
+	xp.pool.Info()
 }
 
 func (xp *Xpost) stopSendersAndWait(t time.Duration) {
-	close(xp.stopch)
+	close(xp.senderch)
 
 	// wait for the goroutines handle the signal
 	time.Sleep(t * time.Millisecond)
@@ -313,28 +300,19 @@ func (xp *Xpost) stopSendersAndWait(t time.Duration) {
 }
 
 func (xp *Xpost) Stop() {
-	t1, t2 := xp.ex.GetMaxTimeout()
-	t3 := xp.GetMaxProcessTimeout()
-	t := t1 + t2 + t3
-	if t < 1000 {
-		t = 1000
-	}
-
 	// first, stop all the sender couriers and wait ntil all the wires are empty
-	xp.stopSendersAndWait(t)
+	xp.stopSendersAndWait(1000)
 
 	// second, stop new event generation
 	close(xp.quitch)
 	// wait for the goroutines handle the signal
-	time.Sleep(t * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// third, stop all mpools
-	for poolT := 0; poolT < numOfXpostIf; poolT++ {
-		xp.mpools[poolT].Stop()
-	}
+	xp.pool.Stop()
 
 	// forth, stop all courier instances
-	for name, couriers := range xp.Couriers {
+	for name, couriers := range xp.couriers {
 		log.Printf("Stopping courier %s ...\n", name)
 		for _, courier := range couriers {
 			if courier.IsSender() {

@@ -70,8 +70,6 @@ func (ma *MsgAgency) Process(msg *xpost.Message) *xpost.Message {
 		return nil
 	}
 
-	//	log.Printf("In MsgAgency.Process\n")
-
 	cnt := string(msg.GetMsg())
 	newcnt := fmt.Sprintf("Agency transit msg: %s", cnt)
 	msg.SetMsg([]byte(newcnt))
@@ -130,10 +128,7 @@ func main() {
 		log.Fatal("Register Courier failed")
 	}
 
-	xpost.GetXpost().SetMsgPoolSize(xpost.WaitT, 16)
-	xpost.GetXpost().SetMsgPoolSize(xpost.ProcessT, 16)
-	xpost.GetXpost().SetMsgPoolSize(xpost.PostT, 16)
-	//	xpost.GetXpost().SetDumpInfoInterval(10000)
+	xpost.GetXpost().SetDumpInfoInterval(5000)
 
 	xpost.GetXpost().Run()
 

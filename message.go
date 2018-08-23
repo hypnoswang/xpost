@@ -6,7 +6,7 @@ import (
 
 type Message struct {
 	from string
-	to   []string
+	dest []string
 	msg  []byte
 }
 
@@ -40,12 +40,12 @@ func (m *Message) SetFrom(from string) {
 	m.from = from
 }
 
-func (m *Message) AppendDest(to ...string) {
-	m.to = append(m.to, to...)
+func (m *Message) AppendDest(dest ...string) {
+	m.dest = append(m.dest, dest...)
 }
 
-func (m *Message) SetDest(to ...string) {
-	m.to = to
+func (m *Message) SetDest(dest ...string) {
+	m.dest = dest
 }
 
 func (m *Message) SetMsg(msg []byte) {
@@ -54,7 +54,7 @@ func (m *Message) SetMsg(msg []byte) {
 
 func (m *Message) reset() {
 	m.from = ""
-	m.to = make([]string, 0)
+	m.dest = make([]string, 0)
 	m.msg = make([]byte, 0)
 }
 
@@ -62,8 +62,8 @@ func (m Message) GetFrom() string {
 	return m.from
 }
 
-func (m Message) GetTo() []string {
-	return m.to
+func (m Message) GetDest() []string {
+	return m.dest
 }
 
 func (m Message) GetMsg() []byte {
