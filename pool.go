@@ -11,33 +11,35 @@ const (
 	sigDone
 )
 
+// Job interface represents an executable object
 type Job interface {
 	Run()
 }
 
-type Worker struct {
+type worker struct {
 	jobch chan Job
 	done  chan struct{}
 	pool  *Pool
 }
 
+// Pool is the collection of goroutines
+// it can accept a Job from user and execute it in one worker
 type Pool struct {
 	name string
 	max  int
 
-	xp      *Xpost
 	lock    *sync.Mutex
-	workers []*Worker
+	workers []*worker
 
-	freelist chan *Worker
+	freelist chan *worker
 	quit     chan struct{}
 }
 
-func (w *Worker) free() {
+func (w *worker) free() {
 	w.pool.freelist <- w
 }
 
-func (w *Worker) start() {
+func (w *worker) start() {
 	log.Printf("Start Worker of Pool %s...", w.pool.name)
 	go func() {
 		for {
@@ -53,7 +55,7 @@ func (w *Worker) start() {
 	}()
 }
 
-func (w *Worker) exec(job Job) {
+func (w *worker) exec(job Job) {
 	defer func() {
 		w.done <- struct{}{}
 		if e := recover(); e != nil {
@@ -65,7 +67,7 @@ func (w *Worker) exec(job Job) {
 
 }
 
-func (w *Worker) dispatch(job Job) {
+func (w *worker) dispatch(job Job) {
 	if job == nil {
 		w.done <- struct{}{}
 		return
@@ -74,32 +76,34 @@ func (w *Worker) dispatch(job Job) {
 	w.jobch <- job
 }
 
-func NewPool(name string, max int, xp *Xpost) *Pool {
-	if len(name) <= 0 || max <= 0 || xp == nil {
+// NewPool create a new pool instance
+func NewPool(name string, max int) *Pool {
+	if len(name) <= 0 || max <= 0 {
 		return nil
 	}
 
 	return &Pool{
 		max:      max,
 		name:     name,
-		xp:       xp,
 		lock:     &sync.Mutex{},
-		workers:  make([]*Worker, 0),
+		workers:  make([]*worker, 0),
 		quit:     make(chan struct{}),
-		freelist: make(chan *Worker, max),
+		freelist: make(chan *worker, max),
 	}
 }
 
+// SetMaxWorker set the max number of workers this pool can create
 func (p *Pool) SetMaxWorker(n int) {
 	p.max = n
 }
 
+// GetMaxWorker returns the max number of workers this pool can create
 func (p *Pool) GetMaxWorker() int {
 	return p.max
 }
 
-func (p *Pool) newWorker() *Worker {
-	w := &Worker{
+func (p *Pool) newWorker() *worker {
+	w := &worker{
 		jobch: make(chan Job),
 		done:  make(chan struct{}),
 		pool:  p}
@@ -109,7 +113,7 @@ func (p *Pool) newWorker() *Worker {
 	return w
 }
 
-func (p *Pool) increaseWorker() *Worker {
+func (p *Pool) increaseWorker() *worker {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -127,8 +131,8 @@ func (p *Pool) increaseWorker() *Worker {
 	return w
 }
 
-func (p *Pool) getFreeWorker() *Worker {
-	var w *Worker = nil
+func (p *Pool) getFreeWorker() *worker {
+	var w *worker
 
 	t := time.Millisecond
 	for {
@@ -150,6 +154,8 @@ func (p *Pool) getFreeWorker() *Worker {
 	return w
 }
 
+// Dispatch dispatch a job to a worker
+// it returns an channel which will become readale when the job is finished
 func (p *Pool) Dispatch(job Job) <-chan struct{} {
 	w := p.getFreeWorker()
 
@@ -158,6 +164,7 @@ func (p *Pool) Dispatch(job Job) <-chan struct{} {
 	return w.done
 }
 
+// Info returns the current stats of the pool
 func (p *Pool) Info() {
 	log.Printf(">>>>>> Pool %s info: \n", p.name)
 
@@ -172,6 +179,7 @@ func (p *Pool) Info() {
 	log.Printf(">>>>>> \tfree: %d\n", free)
 }
 
+// Stop notify all the workers to quit
 func (p *Pool) Stop() {
 	log.Printf("Stop Pool %s...\n", p.name)
 
