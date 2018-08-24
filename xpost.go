@@ -231,6 +231,11 @@ func (xp *Xpost) Run() {
 						return
 					}
 
+					// The reason we dispatch the job to the pool is:
+					// By this way we can respond a quit or senderch event immediately
+					// if we call the run(courier) func in this goroutine, the execution may
+					// blocked in this run(courier) and the quit/senderch will never get a
+					// chance to be handled
 					jobdone := xp.pool.Dispatch(job)
 					if courier.IsSender() {
 						select {
