@@ -8,18 +8,6 @@ import (
 
 var defaltXp *Xpost
 
-const (
-	WaitT = iota
-	ProcessT
-	PostT
-	numOfXpostIf
-)
-
-var xpostIf = []string{
-	"wait",
-	"process",
-	"post"}
-
 func init() {
 	if defaltXp == nil {
 		defaltXp = &Xpost{
