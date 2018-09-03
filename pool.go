@@ -1,7 +1,6 @@
 package xpost
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -40,7 +39,7 @@ func (w *worker) free() {
 }
 
 func (w *worker) start() {
-	log.Printf("Start Worker of Pool %s...", w.pool.name)
+	logInfof("Start Worker of Pool %s...", w.pool.name)
 	go func() {
 		for {
 			select {
@@ -48,7 +47,7 @@ func (w *worker) start() {
 				w.exec(job)
 				w.free()
 			case <-w.pool.quit:
-				log.Printf("Stop Worker of Pool %s...\n", w.pool.name)
+				logInfof("Stop Worker of Pool %s...", w.pool.name)
 				return
 			}
 		}
@@ -59,7 +58,7 @@ func (w *worker) exec(job Job) {
 	defer func() {
 		w.done <- struct{}{}
 		if e := recover(); e != nil {
-			log.Println(e)
+			logInfoln(e)
 		}
 	}()
 
@@ -143,7 +142,7 @@ func (p *Pool) getFreeWorker() *worker {
 		}
 
 		if w == nil {
-			log.Printf("Not enough workers for Pool %s\n", p.name)
+			logErrorf("Not enough workers for Pool %s", p.name)
 			time.Sleep(t)
 			t *= 2
 		} else {
@@ -166,22 +165,22 @@ func (p *Pool) Dispatch(job Job) <-chan struct{} {
 
 // Info returns the current stats of the pool
 func (p *Pool) Info() {
-	log.Printf(">>>>>> Pool %s info: \n", p.name)
+	logInfof(">>>>>> Pool %s info: ", p.name)
 
 	p.lock.Lock()
 	created := len(p.workers)
 	free := len(p.freelist)
 	p.lock.Unlock()
 
-	log.Printf(">>>>>> \tname: %s\n", p.name)
-	log.Printf(">>>>>> \tmax: %d\n", p.max)
-	log.Printf(">>>>>> \tcreated: %d\n", created)
-	log.Printf(">>>>>> \tfree: %d\n", free)
+	logInfof(">>>>>> \tname: %s", p.name)
+	logInfof(">>>>>> \tmax: %d", p.max)
+	logInfof(">>>>>> \tcreated: %d", created)
+	logInfof(">>>>>> \tfree: %d", free)
 }
 
 // Stop notify all the workers to quit
 func (p *Pool) Stop() {
-	log.Printf("Stop Pool %s...\n", p.name)
+	logInfof("Stop Pool %s...", p.name)
 
 	close(p.quit)
 }

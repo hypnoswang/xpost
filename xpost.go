@@ -1,11 +1,13 @@
 package xpost
 
 import (
-	"log"
 	"runtime"
 	"time"
+
+	"github.com/hypnoswang/xlog"
 )
 
+var logger xlog.Logger
 var defaltXp *Xpost
 
 func init() {
@@ -22,6 +24,12 @@ func init() {
 			quitch:    make(chan struct{})}
 	}
 
+	logger = xlog.NewConsoleLogger(xlog.InfoLevel, xlog.TextFormatter)
+}
+
+// SetLogger set the logger instance of the whole xpost world
+func SetLogger(l xlog.Logger) {
+	logger = l
 }
 
 // GetXpost return the global default Xpost instance
@@ -135,7 +143,7 @@ func (xp *Xpost) init() bool {
 	}
 
 	if !xp.hasSender {
-		log.Printf("The xpost must have at least one sender")
+		logError("The xpost must have at least one sender")
 		return false
 	}
 
@@ -156,7 +164,7 @@ func (xp *Xpost) init() bool {
 
 	pool := NewPool(xp.poolName, xp.poolSize)
 	if pool == nil {
-		log.Printf("Create pool failed")
+		logError("Create pool failed")
 		return false
 	}
 
@@ -183,21 +191,21 @@ func (xp *Xpost) start() bool {
 
 Loop:
 	for name, couriers := range xp.couriers {
-		log.Printf("Starting courier %s ...\n", name)
+		logInfof("Starting courier %s ...", name)
 
 		for _, courier := range couriers {
-			log.Printf("Starting %s.%d...\n", courier.GetName(), courier.GetID())
+			logInfof("Starting %s.%d...", courier.GetName(), courier.GetID())
 
 			rv = rv && courier.Start()
 			if !rv {
-				log.Printf("%s.%d start failed!!\n", courier.GetName(), courier.GetID())
+				logInfof("%s.%d start failed!!", courier.GetName(), courier.GetID())
 				break Loop
 			}
 
-			log.Printf("%s.%d started!!\n", courier.GetName(), courier.GetID())
+			logInfof("%s.%d started!!", courier.GetName(), courier.GetID())
 		}
 
-		log.Printf("Courier %s starting finished!!\n", name)
+		logInfof("Courier %s starting finished!!", name)
 	}
 
 	xp.started = rv
@@ -208,20 +216,20 @@ Loop:
 // Run get the xpost to start the work
 func (xp *Xpost) Run() {
 	if !xp.inited && !xp.init() {
-		log.Fatalln("The Xpost Initialization failed") // will call os.Exit(1)
+		logFatalln("The Xpost Initialization failed") // will call os.Exit(1)
 	}
 
 	if !xp.started && !xp.start() {
-		log.Fatalln("The Xpost start failed") // will call os.Exit(1)
+		logFatalln("The Xpost start failed") // will call os.Exit(1)
 	}
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	for name, couriers := range xp.couriers {
-		log.Printf("Running courier %s ...\n", name)
+		logInfof("Running courier %s ...", name)
 
 		for _, courier := range couriers {
-			log.Printf("Running %s.%d...\n", courier.GetName(), courier.GetID())
+			logInfof("Running %s.%d...", courier.GetName(), courier.GetID())
 
 			go func(courier Courier) {
 				job := &courierJob{courier: courier}
@@ -241,9 +249,9 @@ func (xp *Xpost) Run() {
 						select {
 						case <-xp.senderch:
 							quit = true
-							log.Printf("Sender Courier %s.%d exit...", courier.GetName(), courier.GetID())
+							logInfof("Sender Courier %s.%d exit...", courier.GetName(), courier.GetID())
 						case <-xp.quitch:
-							log.Printf("Sender Courier %s.%d exit...", courier.GetName(), courier.GetID())
+							logInfof("Sender Courier %s.%d exit...", courier.GetName(), courier.GetID())
 							quit = true
 						case <-jobdone:
 							continue
@@ -251,7 +259,7 @@ func (xp *Xpost) Run() {
 					} else {
 						select {
 						case <-xp.quitch:
-							log.Printf("Courier %s.%d exit...", courier.GetName(), courier.GetID())
+							logInfof("Courier %s.%d exit...", courier.GetName(), courier.GetID())
 							quit = true
 						case <-jobdone:
 							continue
@@ -280,21 +288,21 @@ func (xp *Xpost) Run() {
 
 // Info dumps the stats of the whole xpost world
 func (xp *Xpost) Info() {
-	log.Printf(">>>>>> couriers info:\n")
+	logInfof(">>>>>> couriers info:")
 	for _, couriers := range xp.couriers {
 		for _, courier := range couriers {
-			log.Printf(">>>>>> id: %d\n", courier.GetID())
-			log.Printf(">>>>>> name: %s\n", courier.GetName())
-			log.Printf(">>>>>> wirecap: %d\n", courier.GetWireCap())
-			log.Println()
+			logInfof(">>>>>> id: %d", courier.GetID())
+			logInfof(">>>>>> name: %s", courier.GetName())
+			logInfof(">>>>>> wirecap: %d", courier.GetWireCap())
+			logInfoln()
 		}
 	}
 
-	log.Printf("\n\n")
+	logInfof("\n")
 
 	xp.ex.Info()
 
-	log.Printf("\n\n")
+	logInfof("\n")
 
 	xp.pool.Info()
 }
@@ -307,7 +315,7 @@ func (xp *Xpost) stopSendersAndWait(t time.Duration) {
 
 	for !xp.ex.isClean() {
 		time.Sleep(100 * time.Millisecond)
-		log.Println("Waiting for all the wires to be clean...")
+		logInfoln("Waiting for all the wires to be clean...")
 	}
 }
 
@@ -326,15 +334,15 @@ func (xp *Xpost) Stop() {
 
 	// forth, stop all courier instances
 	for name, couriers := range xp.couriers {
-		log.Printf("Stopping courier %s ...\n", name)
+		logInfof("Stopping courier %s ...", name)
 		for _, courier := range couriers {
 			if courier.IsSender() {
 				continue
 			}
 
-			log.Printf("Stopping %s.%d...\n", courier.GetName(), courier.GetID())
+			logInfof("Stopping %s.%d...", courier.GetName(), courier.GetID())
 			courier.Stop()
-			log.Printf("%s.%d stopped!!\n", courier.GetName(), courier.GetID())
+			logInfof("%s.%d stopped!!", courier.GetName(), courier.GetID())
 		}
 	}
 }

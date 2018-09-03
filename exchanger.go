@@ -2,7 +2,6 @@ package xpost
 
 import (
 	"errors"
-	"log"
 )
 
 var gExchanger *Exchanger
@@ -42,7 +41,7 @@ type Exchanger struct {
 
 func newWire(n string, c int) *wire {
 	if c < 0 || len(n) <= 0 {
-		log.Fatalf("Invalid wire attributes: name=%s, cap=%d", n, c)
+		logFatalf("Invalid wire attributes: name=%s, cap=%d", n, c)
 		return nil
 	}
 
@@ -66,7 +65,7 @@ func (e *Exchanger) setXpost(xp *Xpost) {
 func (e *Exchanger) registerWire(n string, c int) bool {
 	w := newWire(n, c)
 	if w == nil {
-		log.Fatal("Could not create new wire") // will call os.Exit(1)
+		logFatal("Could not create new wire") // will call os.Exit(1)
 		return false
 	}
 
@@ -77,12 +76,11 @@ func (e *Exchanger) registerWire(n string, c int) bool {
 
 // Info return s the current stats of the exchanger
 func (e Exchanger) Info() {
-	log.Printf("Wires info:\n")
+	logInfof("Wires info:")
 	for _, wire := range e.wires {
-		log.Printf(">>>>>> name: %s\n", wire.name)
-		log.Printf(">>>>>> capacity: %d\n", wire.cap)
-		log.Printf(">>>>>> msg-queued: %d\n", len(wire.pipe))
-		log.Println()
+		logInfof(">>>>>> name: %s", wire.name)
+		logInfof(">>>>>> capacity: %d", wire.cap)
+		logInfof(">>>>>> msg-queued: %d", len(wire.pipe))
 	}
 }
 
@@ -104,7 +102,7 @@ func (e *Exchanger) deliver(m *Message) error {
 	for _, dest := range m.dest {
 		w, ok := e.wires[dest]
 		if !ok {
-			log.Printf("Deliver to not exist wire: %s", dest)
+			logErrorf("Deliver to not exist wire: %s", dest)
 			return errors.New("Wire not found")
 		}
 		wires = append(wires, w)
@@ -139,7 +137,7 @@ func (e *Exchanger) wait(n string) *Message {
 func (e *Exchanger) isClean() bool {
 	for _, w := range e.wires {
 		if l := len(w.pipe); l > 0 {
-			log.Printf("Wire %s is not clean: %d", w.name, l)
+			logErrorf("Wire %s is not clean: %d", w.name, l)
 			return false
 		}
 	}

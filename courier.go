@@ -1,7 +1,7 @@
 package xpost
 
 import (
-	"log"
+//	"log"
 )
 
 // Master implement a Base class of Courier
@@ -139,7 +139,7 @@ func (m *Master) Stop() {
 func run(courier Courier) {
 	defer func() {
 		if e := recover(); e != nil {
-			log.Println(e)
+			logErrorln(e)
 		}
 	}()
 
