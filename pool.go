@@ -172,10 +172,10 @@ func (p *Pool) Info() {
 	free := len(p.freelist)
 	p.lock.Unlock()
 
-	logInfof(">>>>>> \tname: %s", p.name)
-	logInfof(">>>>>> \tmax: %d", p.max)
-	logInfof(">>>>>> \tcreated: %d", created)
-	logInfof(">>>>>> \tfree: %d", free)
+	logInfof(">>>>>> name: %s", p.name)
+	logInfof(">>>>>> max: %d", p.max)
+	logInfof(">>>>>> created: %d", created)
+	logInfof(">>>>>> free: %d", free)
 }
 
 // Stop notify all the workers to quit

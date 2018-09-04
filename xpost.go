@@ -298,12 +298,10 @@ func (xp *Xpost) Info() {
 		}
 	}
 
-	logInfof("\n")
-
+	logInfoln()
 	xp.ex.Info()
 
-	logInfof("\n")
-
+	logInfoln()
 	xp.pool.Info()
 }
 
@@ -327,10 +325,13 @@ func (xp *Xpost) Stop() {
 	// second, stop new event generation
 	close(xp.quitch)
 	// wait for the goroutines handle the signal
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(2000 * time.Millisecond)
 
-	// third, stop all mpools
+	// third, stop the pool
 	xp.pool.Stop()
+
+	// wait for the goroutines handle the signal
+	time.Sleep(2000 * time.Millisecond)
 
 	// forth, stop all courier instances
 	for name, couriers := range xp.couriers {
