@@ -109,8 +109,13 @@ func (e *Exchanger) deliver(m *Message) error {
 	}
 
 	donechs := make([]<-chan struct{}, 0)
-	for _, w := range wires {
-		wdj := &wireDeliverJob{msg: m, wire: w}
+	for idx, w := range wires {
+		newMsg := m
+		if idx > 0 {
+			newMsg = m.Clone()
+		}
+
+		wdj := &wireDeliverJob{msg: newMsg, wire: w}
 		donech := e.xp.pool.Dispatch(wdj)
 		donechs = append(donechs, donech)
 	}

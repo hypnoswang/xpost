@@ -35,6 +35,18 @@ func (m *Message) Free() {
 	msgPool.Put(m)
 }
 
+// Clone returns a new message with the same content
+func (m *Message) Clone() *Message {
+	nm := GetMessage()
+	if nil != nm {
+		nm.from = m.from
+		nm.dest = append(nm.dest, m.dest...)
+		nm.body = append(nm.body, m.body...)
+	}
+
+	return nm
+}
+
 func newMessage() *Message {
 	return &Message{}
 }
